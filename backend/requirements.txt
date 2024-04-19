@@ -1,0 +1,6 @@
+fastapi==0.65.2
+uvicorn==0.13.4
+pymongo==3.11.4
+pinecone-client==2.0.2
+weaviate-client==2.5.0
+pydantic==1.8.2
