@@ -1,20 +1,22 @@
 # backend/app/ocr_service.py
 
 from doctr.models import ocr_predictor
+import asyncio
+from PIL import Image
+import io
 
-def perform_ocr(image_path):
-    """Perform OCR on an image file."""
+async def perform_ocr(image_bytes):
+    """Perform OCR asynchronously on an image bytes."""
+    loop = asyncio.get_event_loop()
+    
     # Initialize the OCR predictor
     model = ocr_predictor(pretrained=True)
     
-    # Read the image file
-    with open(image_path, 'rb') as img_file:
-        image = img_file.read()
-
-    # Perform OCR
-    result = model([image])
+    # Convert bytes to PIL Image
+    image = Image.open(io.BytesIO(image_bytes))
     
-    # Extract text
-    extracted_text = result.summary()
+    # Run OCR using executor to avoid blocking the event loop
+    extracted_text = await loop.run_in_executor(None, model, [image])
     
-    return extracted_text
+    # Extract text - assuming result structure adjustment according to actual return
+    return extracted_text.summary()
