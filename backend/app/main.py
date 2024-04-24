@@ -1,23 +1,26 @@
-from fastapi import File, FastAPI, UploadFile, HTTPException
-from api.jobs import router as job_router
-from api.candidates import router as candidate_router
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
-# Import your OCR and NLP services (update with actual paths)
-from services.ocr_service import perform_ocr
-from services.nlp_service import extract_skills
-
+from pydantic import BaseModel, ValidationError
 import logging
 
-# Initialize FastAPI app with a title
+# Local imports for modular services
+from api.jobs import router as job_router
+from api.candidates import router as candidate_router
+from services.ocr_service import perform_ocr
+from services.skills_extraction_service import extract_direct_skills, infer_skills
+from services.experience_service import extract_experience_details
+from services.career_progression_service import analyze_career_progression
+from services.company_profiles_service import fetch_company_profile
+
+# Initialize the FastAPI application with metadata
 app = FastAPI(title="AI Recruiter API")
 
-# Set up logging
+# Configure logging
 logger = logging.getLogger("uvicorn.error")
 
-# Include routers
-# Include job and candidate routers with versioned API prefixes
-app.include_router(job_router, prefix="/api/v1")
-app.include_router(candidate_router, prefix="/api/v1")
+# Register API routes from other modules
+app.include_router(job_router, prefix="/api/v1/jobs")
+app.include_router(candidate_router, prefix="/api/v1/candidates")
 
 @app.get("/")
 async def root():
@@ -26,66 +29,69 @@ async def root():
     """
     return {"message": "Welcome to the AI Recruiter API"}
 
-# Here you can add additional routes for OCR and NLP operations as required
-# For example, an endpoint to perform OCR on an uploaded image
+class TextExtractionRequest(BaseModel):
+    text: str
+
 @app.post("/perform-ocr/")
 async def ocr_endpoint(file: UploadFile = File(...)):
     """
-    POST endpoint to perform OCR on the uploaded image file.
-
-    Args:
-    file (UploadFile): An image file received as a part of the form data.
-
-    Returns:
-    JSONResponse: Contains the extracted text from the image.
+    Endpoint to perform OCR on an uploaded image file and extract text.
     """
     try:
-        # Read the image file as bytes, then perform OCR
         image_bytes = await file.read()
         extracted_text = await perform_ocr(image_bytes)
         return JSONResponse(content={"extracted_text": extracted_text}, status_code=200)
     except Exception as e:
-        logger.error(f"OCR processing failed: {str(e)}")
+        logger.error(f"OCR processing failed: {e}")
         return JSONResponse(content={"error": "OCR processing failed", "details": str(e)}, status_code=500)
-
 
 @app.post("/extract-text/")
 async def extract_text(file: UploadFile = File(...)):
     """
-    POST endpoint to extract text and skills from an uploaded image file.
-
-    Args:
-    file (UploadFile): An image file received as part of the form data.
-
-    Returns:
-    JSONResponse: Contains the extracted text and skills from the image.
+    Endpoint to extract text and skills from an uploaded image file.
     """
     try:
         image_bytes = await file.read()
         text = await perform_ocr(image_bytes)
-        skills = await extract_skills(text)
+        skills = extract_direct_skills(text)
         return JSONResponse(content={"text": text, "skills": skills}, status_code=200)
     except Exception as e:
-        logger.error(f"Failed to extract text or skills: {str(e)}")
+        logger.error(f"Failed to extract text or skills: {e}")
         return JSONResponse(content={"error": "Failed to process the image", "details": str(e)}, status_code=500)
 
-
-
 @app.post("/extract-skills/")
-async def extract_skills_endpoint(text: str):
+async def extract_skills_endpoint(request: TextExtractionRequest):
     """
-    POST endpoint to extract skills from a given text.
-
-    Args:
-    text (str): Text from which to extract skills.
-
-    Returns:
-    JSONResponse: Contains the skills extracted from the text.
+    Endpoint to extract skills from provided text using NLP techniques.
     """
     try:
-        skills = await extract_skills(text)
+        skills = extract_direct_skills(request.text)
         return JSONResponse(content={"skills": skills}, status_code=200)
+    except ValidationError as ve:
+        return JSONResponse(content={"error": "Invalid input", "details": str(ve)}, status_code=400)
     except Exception as e:
-        logger.error(f"Failed to extract skills: {str(e)}")
+        logger.error(f"Failed to extract skills: {e}")
         return JSONResponse(content={"error": "Failed to analyze the text", "details": str(e)}, status_code=500)
+    
+@app.post("/analyze-cv/")
+async def analyze_cv(cv_text: str):
+    """
+    Comprehensive CV analysis endpoint to extract skills, experience, and career progression.
+    """
+    try:
+        skills = extract_direct_skills(cv_text)
+        inferred_skills = infer_skills("Software Engineer", "Tech")
+        experience_details = extract_experience_details(cv_text)
+        career_progress = analyze_career_progression(experience_details['roles'])
+        company_profile = fetch_company_profile("OpenAI")
+        return JSONResponse(content={
+            "skills": skills + inferred_skills,
+            "experience": experience_details,
+            "career_progression": career_progress,
+            "company_profile": company_profile
+        }, status_code=200)
+    except Exception as e:
+        logger.error(f"CV analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+# Additional endpoint examples can be added here with similar structure
